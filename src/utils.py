@@ -6,16 +6,18 @@ from sqlalchemy import create_engine
 
 # Pobieranie adresu bazy z sekretów chmury Streamlit
 def get_db_engine():
-    # Streamlit Cloud przekaże nam pełny link w zmiennej środowiskowej
     db_url = os.getenv("SUPABASE_DB_URL")
     if not db_url:
         raise ValueError("Brak zmiennej SUPABASE_DB_URL w konfiguracji sekretów!")
 
-    # Podmieniamy prefix, ponieważ SQLAlchemy wymaga 'postgresql://' zamiast 'postgres://'
     if db_url.startswith("postgres://"):
         db_url = db_url.replace("postgres://", "postgresql://", 1)
 
-    return create_engine(db_url)
+    # DODAJEMY: connect_args z wyłączeniem prepared statements dla stabilności na porcie 6543
+    return create_engine(
+        db_url,
+        connect_args={"options": "-c statement_timeout=30000"}
+    )
 
 
 def init_database():
