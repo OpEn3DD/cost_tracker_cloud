@@ -1,0 +1,18 @@
+# Klucze API i sekrety
+.env
+
+# Środowisko wirtualne Python
+venv/
+ENV/
+env/
+
+# Cache Pythona
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Pliki systemowe i IDE
+.vscode/
+.idea/
+.DS_Store
