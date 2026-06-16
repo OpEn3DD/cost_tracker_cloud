@@ -82,52 +82,74 @@ def analyze_receipt_with_gemini(uploaded_file) -> ReceiptStructure:
     return ReceiptStructure.model_validate_json(response.text)
 
 
-def generate_financial_insights(expenses_df: pd.DataFrame) -> str:
+def generate_financial_insights(expenses_df: pd.DataFrame, user_context: str = "") -> str:
     """
-    Generuje spersonalizowane wnioski i porady finansowe na podstawie historii wydatków.
+    Generuje zaawansowany raport finansowy. Dane historyczne z bazy stanowią
+    główny fundament analizy, a opcjonalny kontekst użytkownika służy jako
+    dodatkowy filtr i uzupełnienie dla doradcy AI.
     """
+    import pandas as pd  # Bezpieczny import lokalny dla Streamlit Cloud
+
     if expenses_df.empty:
         return "Brak danych w bazie, aby przeprowadzić analizę AI. Dodaj najpierw paragony!"
 
-    # 1. Przygotowanie zagregowanych metryk tekstowych dla LLM
-    total_spent = expenses_df['cena_pln'].sum()
+    # Kopia danych, aby nie mutować stanu aplikacji
+    df_copy = expenses_df.copy()
 
-    # Podsumowanie według kategorii
-    category_summary = expenses_df.groupby('kategoria')['cena_pln'].sum().to_string()
+    # 1. Przygotowanie agregatów liczbowych (Twarde Dane)
+    total_spent = df_copy['cena_pln'].sum()
+    category_summary = df_copy.groupby('kategoria')['cena_pln'].sum().to_string()
+    recent_transactions = df_copy.head(10)[['nazwa_pozycji', 'cena_pln', 'kategoria']].to_string(index=False)
 
-    # Wyciągamy 10 ostatnich transakcji dla złapania kontekstu ostatnich działań
-    recent_transactions = expenses_df.head(10)[['nazwa_pozycji', 'cena_pln', 'kategoria']].to_string(index=False)
+    df_copy['data_zapisu'] = pd.to_datetime(df_copy['data_zapisu'])
+    monthly_trend = df_copy.groupby(df_copy['data_zapisu'].dt.to_period('M'))['cena_pln'].sum().to_string()
 
-    # Kontekst czasowy
-    expenses_df['data_zapisu'] = pd.to_datetime(expenses_df['data_zapisu'])
-    monthly_trend = expenses_df.groupby(expenses_df['data_zapisu'].dt.to_period('M'))['cena_pln'].sum().to_string()
+    # 2. Obsługa opcjonalnego kontekstu (Dynamiczny dodatek)
+    context_injection = "Brak dodatkowych uwag od użytkownika."
+    if user_context.strip():
+        context_injection = (
+            f"Użytkownik przekazał następujące cele/plany krótko- lub długoterminowe:\n"
+            f"\"\"\"\n{user_context.strip()}\n\"\"\""
+        )
 
-    # 2. Budowa promptu dla Doradcy AI
+    # 3. Konstrukcja zbalansowanego promptu systemowego
     prompt = f"""
-    Jesteś elitarnym, osobistym doradcą finansowym oraz analitykiem danych. Twoim zadaniem jest przeanalizowanie poniższych danych budżetowych użytkownika i dostarczenie mu potężnych, konkretnych i krytycznych wniosków (AI Insights).
+    Jesteś elitarnym, niezależnym doradcą finansowym i mistrzem analizy danych (Data Science). 
+    Twoim nadrzędnym zadaniem jest przeprowadzenie całościowej i obiektywnej analizy finansów użytkownika na podstawie jego REALNYCH twardych danych historycznych.
 
-    Oto podsumowanie finansowe użytkownika:
-    - Całkowita suma wydatków w systemie: {total_spent:.2f} PLN
+    =========================================
+    1. FUNDAMENT ANALITYCZNY (TWARDE DANE)
+    =========================================
+    - Całkowity skumulowany koszt w systemie: {total_spent:.2f} PLN
 
-    - Podział wydatków na kategorie (Suma w PLN):
+    - Globalny podział wydatków na kategorie:
     {category_summary}
 
-    - Trend wydatków w ujęciu miesięcznym:
+    - Historyczny trend wydatków (miesiąc po miesiącu):
     {monthly_trend}
 
-    - Ostatnie 10 transakcji:
+    - Ostatnie operacje (kontekst bieżący):
     {recent_transactions}
 
-    Sformułuj swój raport w sposób profesjonalny, bezpośredni i konkretny. Unikaj ogólników typu "warto oszczędzać". Skup się na:
-    1. **Wychwytywaniu anomalii i trendów:** (np. która kategoria dominuje, czy widać skoki w ujęciu miesięcznym, czy zdarzenia losowe mocno nadszarpnęły budżet).
-    2. **Konkretnych rekomendacjach:** Gdzie realnie użytkownik może szukać optymalizacji kosztów na podstawie jego danych.
-    3. **Prognozie/Ostrzeżeniu:** Krótkie podsumowanie, na co powinien uważać w najbliższym miesiącu.
+    =========================================
+    2. FILTR KONTEKSTOWY (DODATEK UŻYTKOWNIKA)
+    =========================================
+    {context_injection}
 
-    Formatuj odpowiedź używając czytelnych punktów Markdown, pogrubień i emotikon, aby raport wyglądał nowocześnie i przejrzyście w interfejsie Streamlit.
+    =========================================
+    STRUKTURA WYKONAWCZA RAPORTU (ZADANIA DLA AI)
+    =========================================
+    Wygeneruj zwięzły, konkretny raport budżetowy. Zastosuj poniższą strukturę:
+
+    1. 📊 GLOBALNY PRZEGLĄD STRUKTURY KOSZTÓW: Na podstawie danych liczbowych wskaż, które kategorie realnie pożerają największą część kapitału. Oceń stabilność trendu miesięcznego.
+    2. 🔍 DETEKCJA ANOMALII: Wskaż nietypowe skoki wydatków lub obciążenia (np. ubezpieczenia, serwisy, duże zakupy jednorazowe), które zaburzyły płynność finansową.
+    3. 🧠 ODNIESIENIE DO PLANÓW UŻYTKOWNIKA (JEŚLI DOTYCZY): Przeanalizuj "Dodatek użytkownika" przez pryzmat jego "Fundamentu analitycznego". Odpowiedz na pytanie: Czy na podstawie wzorców jego wydatków, cele takie jak wakacje, oszczędności czy limity zarobkowe są realne do osiągnięcia? Co musi zmienić w obecnej strukturze kosztów, aby zrealizować te plany?
+    4. 🎯 3 STRATEGICZNE REKOMENDACJE: Podaj dokładnie trzy, bezwzględnie konkretne i mierzalne akcje naprawcze dążące do optymalizacji budżetu.
+
+    Formatuj raport przy użyciu nowoczesnego Markdown, emojek, pogrubień istotnych kwot i przejrzystych punktów. Unikaj ogólnikowych frazesów – operuj na liczbach podanych w fundamencie.
     """
 
     try:
-        # Wywołanie modelu tekstowego
         response = client.models.generate_content(
             model='gemini-2.5-flash',
             contents=prompt
