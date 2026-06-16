@@ -5,24 +5,27 @@ from sqlalchemy import create_engine
 
 def get_db_engine():
     """
-    Pobiera adres URL bazy danych z sekretów Streamlit Cloud i dynamicznie
-    konwertuje go na dialekt obsługiwany przez niezawodny sterownik pg8000.
+    Pobiera adres URL bazy danych z sekretów i konfiguruje silnik
+    z jawnym przekazaniem parametrów, aby uniknąć błędów autoryzacji poolera.
     """
     db_url = os.getenv("SUPABASE_DB_URL")
     if not db_url:
         raise ValueError("❌ BŁĄD: Brak zmiennej SUPABASE_DB_URL w konfiguracji sekretów Streamlit!")
 
-    # Podmieniamy standardowe prefiksy na postgresql+pg8000://
+    # 1. Jeśli z pośpiechu adres ma standardowy prefix, ujednolicamy go pod pg8000
     if db_url.startswith("postgres://"):
         db_url = db_url.replace("postgres://", "postgresql+pg8000://", 1)
     elif db_url.startswith("postgresql://"):
         db_url = db_url.replace("postgresql://", "postgresql+pg8000://", 1)
 
-    # Tworzymy silnik SQLAlchemy zoptymalizowany pod bezstanowy pooling transakcji
+    # 2. Dla bezpiecznego poolingu w Supabase V2 na porcie 6543 dodajemy parametry wykonawcze
+    # Rezygnujemy ze zmiennych przygotowywanych (prepared statements), które wywalają pooler
     return create_engine(
         db_url,
-        # Wymuszamy natywne limity i stabilność dla połączeń chmurowych przez pg8000
-        connect_args={"timeout": 30}
+        connect_args={
+            "timeout": 30,
+            "tcp_keepalive": True
+        }
     )
 
 
