@@ -1,39 +1,51 @@
 import os
-import sqlite3
 import pandas as pd
 from sqlalchemy import create_engine
 
 
-# Pobieranie adresu bazy z sekretów chmury Streamlit
 def get_db_engine():
+    """
+    Pobiera adres URL bazy danych z sekretów Streamlit Cloud i dynamicznie
+    konwertuje go na dialekt obsługiwany przez niezawodny sterownik pg8000.
+    """
     db_url = os.getenv("SUPABASE_DB_URL")
     if not db_url:
-        raise ValueError("Brak zmiennej SUPABASE_DB_URL w konfiguracji sekretów!")
+        raise ValueError("❌ BŁĄD: Brak zmiennej SUPABASE_DB_URL w konfiguracji sekretów Streamlit!")
 
+    # Podmieniamy standardowe prefiksy na postgresql+pg8000://
     if db_url.startswith("postgres://"):
-        db_url = db_url.replace("postgres://", "postgresql://", 1)
+        db_url = db_url.replace("postgres://", "postgresql+pg8000://", 1)
+    elif db_url.startswith("postgresql://"):
+        db_url = db_url.replace("postgresql://", "postgresql+pg8000://", 1)
 
-    # DODAJEMY: connect_args z wyłączeniem prepared statements dla stabilności na porcie 6543
+    # Tworzymy silnik SQLAlchemy zoptymalizowany pod bezstanowy pooling transakcji
     return create_engine(
         db_url,
-        connect_args={"options": "-c statement_timeout=30000"}
+        # Wymuszamy natywne limity i stabilność dla połączeń chmurowych przez pg8000
+        connect_args={"timeout": 30}
     )
 
 
 def init_database():
-    """W chmurze tabela jest tworzona ręcznie przez panel Supabase, funkcja pomocnicza."""
+    """
+    W wersji chmurowej struktura bazy (tabela 'paragony') została zainicjalizowana
+    ręcznie bezpośrednio w edytorze SQL panelu Supabase.
+    Funkcja pozostaje pusta, aby zachować pełną kompatybilność z app.py.
+    """
     pass
 
 
 def save_to_sqlite(df: pd.DataFrame) -> bool:
     """
-    Nazwa funkcji zostaje stara, aby nie zmieniać app.py!
-    Wewnątrz logika wysyła dane prosto do chmury Supabase.
+    Nazwa funkcji zostaje niezmieniona z wersji lokalnej (dzięki temu app.py działa bez modyfikacji).
+    Wewnątrz logika przekierowuje i zapisuje zatwierdzony koszyk bezpośrednio w chmurze Supabase.
     """
+    # Filtrujemy tylko pozycje oznaczone przez użytkownika jako aktywne
     approved_df = df[df["Uwzględnij"] == True].copy()
     if approved_df.empty:
         return False
 
+    # Czyszczenie i mapowanie nazw kolumn pod strukturę bazy danych PostgreSQL
     approved_df = approved_df.drop(columns=["Uwzględnij"])
     approved_df = approved_df.rename(columns={
         "Nazwa pozycji": "nazwa_pozycji",
@@ -41,28 +53,35 @@ def save_to_sqlite(df: pd.DataFrame) -> bool:
         "Kategoria": "kategoria"
     })
 
-    # Dodajemy timestamp w formacie UTC
+    # Dodajemy sygnaturę czasową zapisu w formacie strefy czasowej UTC
     approved_df["data_zapisu"] = pd.Timestamp.now(tz="UTC")
 
-    # Połączenie i natychmiastowy upload do chmury przez Pandas
+    # Łączenie i natychmiastowy upload paczki danych do tabeli w chmurze
     engine = get_db_engine()
     approved_df.to_sql("paragony", engine, if_exists="append", index=False)
     return True
 
 
 def get_all_expenses() -> pd.DataFrame:
-    """Pobiera dane na żywo z bazy PostgreSQL w chmurze."""
+    """
+    Pobiera kompletny rejestr transakcji historycznych z chmury Supabase
+    sortując wpisy od najnowszych.
+    """
     try:
         engine = get_db_engine()
-        df = pd.read_sql_query("SELECT * FROM paragony ORDER BY data_zapisu DESC", engine)
+        query = "SELECT id, nazwa_pozycji, cena_pln, kategoria, data_zapisu FROM paragony ORDER BY data_zapisu DESC"
+        df = pd.read_sql_query(query, engine)
         return df
     except Exception:
-        # Zwraca pusty DataFrame jeśli baza jest jeszcze pusta lub brak połączenia
+        # Bezpiecznik: w przypadku pustej tabeli lub braku sieci zwraca czysty szkielet danych
         return pd.DataFrame()
 
 
 def get_category_summary() -> pd.DataFrame:
-    """Pobiera agregację kategorii na żywo z chmury."""
+    """
+    Wykonuje zaawansowaną agregację i kalkulację statystyk kosztowych
+    bezpośrednio na silniku bazodanowym PostgreSQL.
+    """
     try:
         engine = get_db_engine()
         query = """
@@ -81,15 +100,18 @@ def get_category_summary() -> pd.DataFrame:
 
 
 def get_monthly_trend() -> pd.DataFrame:
-    """Pobiera trendy miesięczne dostosowane do składni PostgreSQL."""
+    """
+    Analizuje strumień kosztów w czasie, grupując dane do formatu rok-miesiąc.
+    Dostosowane do specyficznej dla PostgreSQL składni funkcji to_char().
+    """
     try:
         engine = get_db_engine()
         query = """
-                SELECT to_char(data_zapisu, 'YYYY-MM') as "Miesiąc", \
+                SELECT TO_CHAR(data_zapisu, 'YYYY-MM') as "Miesiąc", \
                        kategoria                       as "Kategoria", \
                        SUM(cena_pln)                   as "Suma"
                 FROM paragony
-                GROUP BY to_char(data_zapisu, 'YYYY-MM'), kategoria
+                GROUP BY TO_CHAR(data_zapisu, 'YYYY-MM'), kategoria
                 ORDER BY "Miesiąc" ASC \
                 """
         return pd.read_sql_query(query, engine)
