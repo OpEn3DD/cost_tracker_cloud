@@ -149,72 +149,138 @@ with tab_comparison:
         st.info("Baza danych nie zawiera rekordów.")
 
 # ==========================================
-# ZAKŁADKA 3: DODAJ PARAGON (Układ sekwencyjny pod sobą)
+# ZAKŁADKA 3: DODAJ WYDATEK (AI lub Ręcznie)
 # ==========================================
 with tab_add_receipt:
-    st.markdown("### Import Dokumentu")
-    uploaded_file = st.file_uploader(
-        "Wczytaj obraz dokumentu zakupu (Format: JPG, PNG)",
-        type=["jpg", "jpeg", "png"],
-        key="receipt_uploader_main"
+    st.markdown("### Metoda wprowadzenia danych")
+    input_method = st.radio(
+        "Wybierz w jaki sposób chcesz wprowadzić koszty:",
+        ["Skaner dokumentu (AI)", "Manualny formularz (Ręcznie)"],
+        horizontal=True,
+        key="input_method_selector"
     )
 
-    if uploaded_file:
-        st.image(uploaded_file, caption="Dokument źródłowy", use_container_width=True)
-
-        if st.button("Uruchom proces ekstrakcji", type="primary", use_container_width=True):
-            with st.spinner("Przetwarzanie obrazu przez AI..."):
-                try:
-                    ai_result = analyze_receipt_with_gemini(uploaded_file)
-                    items_list = [item.model_dump() for item in ai_result.items]
-                    df = pd.DataFrame(items_list)
-
-                    df = df.rename(columns={
-                        "item_name": "Nazwa pozycji",
-                        "price": "Cena (PLN)",
-                        "category": "Kategoria"
-                    })
-                    df["Uwzględnij"] = True
-
-                    st.session_state.df_receipt = df
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Błąd krytyczny modułu parsowania: {e}")
-
-    # Separator sekcji importu od sekcji weryfikacji
     st.divider()
 
-    if st.session_state.df_receipt is not None:
-        st.markdown("### Weryfikacja pozycji i zapis")
-        edited_df = st.data_editor(
-            st.session_state.df_receipt,
-            num_rows="dynamic",
-            column_config={
-                "Kategoria": st.column_config.SelectboxColumn("Kategoria systemowa", options=CATEGORIES, required=True),
-                "Cena (PLN)": st.column_config.NumberColumn(format="%.2f zł"),
-                "Uwzględnij": st.column_config.CheckboxColumn("Aktywny")
-            },
-            use_container_width=True,
-            key="main_data_editor"
+    # --- WARIANT A: AUTOMATYCZNA EKSTRAKCJA AI ---
+    if input_method == "Skaner dokumentu (AI)":
+        st.markdown("### Import Dokumentu")
+        uploaded_file = st.file_uploader(
+            "Wczytaj obraz dokumentu zakupu (Format: JPG, PNG)",
+            type=["jpg", "jpeg", "png"],
+            key="receipt_uploader_main"
         )
-        st.session_state.df_receipt = edited_df
 
-        filtered_df = edited_df[edited_df["Uwzględnij"] == True]
-        if not filtered_df.empty:
-            total_cost = filtered_df["Cena (PLN)"].sum()
-            st.metric(label="Wartość kalkulowana koszyka", value=f"{total_cost:.2f} PLN")
+        if uploaded_file:
+            st.image(uploaded_file, caption="Dokument źródłowy", use_container_width=True)
 
-        st.write("")  # Odstęp estetyczny przed przyciskiem
+            if st.button("Uruchom proces ekstrakcji", type="primary", use_container_width=True):
+                with st.spinner("Przetwarzanie obrazu przez AI..."):
+                    try:
+                        ai_result = analyze_receipt_with_gemini(uploaded_file)
+                        items_list = [item.model_dump() for item in ai_result.items]
+                        df = pd.DataFrame(items_list)
 
-        if st.button("Zatwierdź i zapisz sesję do bazy", type="primary", use_container_width=True):
-            if save_to_sqlite(edited_df):
-                st.session_state.df_receipt = None
-                st.toast("Dane zostały zarchiwizowane.")
-                st.rerun()
-            else:
-                st.warning("Brak aktywnych pozycji do zapisu.")
+                        df = df.rename(columns={
+                            "item_name": "Nazwa pozycji",
+                            "price": "Cena (PLN)",
+                            "category": "Kategoria"
+                        })
+                        df["Uwzględnij"] = True
+
+                        st.session_state.df_receipt = df
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Błąd krytyczny modułu parsowania: {e}")
+
+        st.divider()
+
+        if st.session_state.df_receipt is not None:
+            st.markdown("### Weryfikacja pozycji i zapis")
+            edited_df = st.data_editor(
+                st.session_state.df_receipt,
+                num_rows="dynamic",
+                column_config={
+                    "Kategoria": st.column_config.SelectboxColumn("Kategoria systemowa", options=CATEGORIES,
+                                                                  required=True),
+                    "Cena (PLN)": st.column_config.NumberColumn(format="%.2f zł"),
+                    "Uwzględnij": st.column_config.CheckboxColumn("Aktywny")
+                },
+                use_container_width=True,
+                key="main_data_editor"
+            )
+            st.session_state.df_receipt = edited_df
+
+            filtered_df = edited_df[edited_df["Uwzględnij"] == True]
+            if not filtered_df.empty:
+                total_cost = filtered_df["Cena (PLN)"].sum()
+                st.metric(label="Wartość kalkulowana koszyka", value=f"{total_cost:.2f} PLN")
+
+            st.write("")
+
+            if st.button("Zatwierdź i zapisz sesję do bazy", type="primary", use_container_width=True):
+                if save_to_sqlite(edited_df):
+                    st.session_state.df_receipt = None
+                    st.toast("Dane zostały zarchiwizowane.")
+                    st.rerun()
+                else:
+                    st.warning("Brak aktywnych pozycji do zapisu.")
+        else:
+            st.caption("Wgraj plik powyżej, aby uruchomić edytor pozycji i kategoryzację AI.")
+
+    # --- WARIANT B: FORMULARZ MANUALNY (NOWOŚĆ) ---
     else:
-        st.caption("Wgraj plik powyżej, aby uruchomić edytor pozycji i kategoryzację AI.")
+        st.markdown("### Nowy wydatek / rachunek")
+
+        # Tworzymy formularz Streamlit, aby dane wysyłały się pakietem dopiero po kliknięciu
+        with st.form("manual_expense_form", clear_on_submit=True):
+            manual_name = st.text_input(
+                "Nazwa towaru / usługi / rachunku:",
+                placeholder="np. Czynsz za mieszkanie, Bilet miesięczny, Uber",
+                help="Wpisz jednoznaczną nazwę dla identyfikacji wydatku."
+            )
+
+            manual_price = st.number_input(
+                "Wartość transakcji (PLN):",
+                min_value=0.01,
+                max_value=100000.00,
+                step=0.01,
+                format="%.2f"
+            )
+
+            manual_category = st.selectbox(
+                "Przypisz kategorię budżetową:",
+                options=CATEGORIES,
+                index=0
+            )
+
+            st.write("")
+            submit_manual = st.form_submit_with_陰影 = st.form_submit_button(
+                "Zarejestruj wydatek manualnie",
+                type="primary",
+                use_container_width=True
+            )
+
+            if submit_manual:
+                if manual_name.strip() == "":
+                    st.error("Pole 'Nazwa' nie może być puste!")
+                else:
+                    # Budujemy uproszczoną strukturę DataFrame identyczną z tą, którą generuje AI,
+                    # dzięki czemu funkcja save_to_sqlite w utils.py przetworzy ją bez modyfikacji!
+                    manual_data = {
+                        "Nazwa pozycji": [manual_name.strip()],
+                        "Cena (PLN)": [manual_price],
+                        "Kategoria": [manual_category],
+                        "Uwzględnij": [True]
+                    }
+                    df_manual = pd.DataFrame(manual_data)
+
+                    with st.spinner("Zapisywanie w bazie chmurowej..."):
+                        if save_to_sqlite(df_manual):
+                            st.toast("Wydatek wprowadzony pomyślnie!")
+                            st.rerun()
+                        else:
+                            st.error("Błąd zapisu strukturalnego do bazy danych.")
 
 # ==========================================
 # ZAKŁADKA 4: REJESTR TRANSAKCJI
