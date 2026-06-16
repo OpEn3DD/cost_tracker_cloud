@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-from src.gemini_client import analyze_receipt_with_gemini
+from src.gemini_client import analyze_receipt_with_gemini, generate_financial_insights
 from src.utils import init_database, save_to_sqlite, get_all_expenses, get_category_summary, get_monthly_trend
 
 # Konfiguracja systemowa aplikacji
@@ -34,11 +34,12 @@ if 'df_receipt' not in st.session_state:
     st.session_state.df_receipt = None
 
 # --- KORPUS GŁÓWNY: Definicja Zakładek ---
-tab_monthly, tab_comparison, tab_add_receipt, tab_history = st.tabs([
+tab_monthly, tab_comparison, tab_add_receipt, tab_history,tab_ai = st.tabs([
     "Przegląd miesięczny",
     "Porównanie okresów",
     "Dodaj paragon",
-    "Rejestr transakcji"
+    "Rejestr transakcji",
+    "Analiza AI"
 ])
 
 # Pobranie danych bazowych do analiz globalnych
@@ -305,3 +306,53 @@ with tab_history:
         )
     else:
         st.info("Brak rekordów w archiwum systemowym.")
+
+# ==========================================
+# ZAKŁADKA 5: ANALIZA AI & DORADCA FINANSOWY
+# ==========================================
+with tab_ai:
+    st.markdown("## 🧠 Inteligentny Doradca Finansowy GenSI")
+    st.caption(
+        "Moduł wykorzystuje generatywną sztuczną inteligencję Gemini do głębokiej analizy Twoich struktur kosztów.")
+    st.divider()
+
+    # Pobieramy dane z bazy
+    expenses_all = get_all_expenses()
+
+    if expenses_all.empty:
+        st.info(
+            "💡 Twój rejestr wydatków jest pusty. Dodaj lub zaimplementuj paragony, aby uruchomić analizę doradcy AI.")
+    else:
+        # Mały panel kontrolny
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            st.markdown("### 📊 Generuj nowy raport kosztów")
+            st.write("Model Gemini przeanalizuje trendy miesięczne, anomalie oraz sklasyfikuje ryzyka budżetowe.")
+        with col2:
+            # Przycisk wymuszający odświeżenie analizy przez AI
+            generate_button = st.button("🚀 Uruchom Analizę AI", use_container_width=True)
+
+        st.divider()
+
+        # Stan sesji, aby zapamiętać wygenerowany raport i nie odpytywać API przy każdym kliknięciu w UI
+        if "ai_report" not in st.session_state:
+            st.session_state.ai_report = None
+
+        if generate_button:
+            with st.spinner("🧠 Sztuczna inteligencja analizuje Twoje finanse (szukanie anomalii i trendów)..."):
+                # Wywołanie funkcji z gemini_client
+                st.session_state.ai_report = generate_financial_insights(expenses_all)
+                st.toast("Analiza AI wygenerowana pomyślnie!", icon="✅")
+
+        # Jeśli raport jest już w pamięci sesji, wyświetlamy go w ładnym boksie
+        if st.session_state.ai_report:
+            st.markdown("### 📝 Wynik analizy strukturalnej Gemini:")
+            st.info(st.session_state.ai_report)
+
+            # Dodatkowy smaczek - możliwość pobrania raportu jako plik tekstowy
+            st.download_button(
+                label="📥 Pobierz raport AI (.txt)",
+                data=st.session_state.ai_report,
+                file_name="raport_budzetowy_ai.txt",
+                mime="text/plain"
+            )

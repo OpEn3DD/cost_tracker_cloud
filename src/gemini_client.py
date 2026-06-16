@@ -1,4 +1,5 @@
 import os
+import pandas as pd
 from typing import List, Literal
 from dotenv import load_dotenv
 from google import genai
@@ -79,3 +80,58 @@ def analyze_receipt_with_gemini(uploaded_file) -> ReceiptStructure:
 
     # Walidacja tekstowego formatu JSON bezpośrednio do obiektów Pydantic i zwrot danych
     return ReceiptStructure.model_validate_json(response.text)
+
+
+def generate_financial_insights(expenses_df: pd.DataFrame) -> str:
+    """
+    Generuje spersonalizowane wnioski i porady finansowe na podstawie historii wydatków.
+    """
+    if expenses_df.empty:
+        return "Brak danych w bazie, aby przeprowadzić analizę AI. Dodaj najpierw paragony!"
+
+    # 1. Przygotowanie zagregowanych metryk tekstowych dla LLM
+    total_spent = expenses_df['cena_pln'].sum()
+
+    # Podsumowanie według kategorii
+    category_summary = expenses_df.groupby('kategoria')['cena_pln'].sum().to_string()
+
+    # Wyciągamy 10 ostatnich transakcji dla złapania kontekstu ostatnich działań
+    recent_transactions = expenses_df.head(10)[['nazwa_pozycji', 'cena_pln', 'kategoria']].to_string(index=False)
+
+    # Kontekst czasowy
+    expenses_df['data_zapisu'] = pd.to_datetime(expenses_df['data_zapisu'])
+    monthly_trend = expenses_df.groupby(expenses_df['data_zapisu'].dt.to_period('M'))['cena_pln'].sum().to_string()
+
+    # 2. Budowa promptu dla Doradcy AI
+    prompt = f"""
+    Jesteś elitarnym, osobistym doradcą finansowym oraz analitykiem danych. Twoim zadaniem jest przeanalizowanie poniższych danych budżetowych użytkownika i dostarczenie mu potężnych, konkretnych i krytycznych wniosków (AI Insights).
+
+    Oto podsumowanie finansowe użytkownika:
+    - Całkowita suma wydatków w systemie: {total_spent:.2f} PLN
+
+    - Podział wydatków na kategorie (Suma w PLN):
+    {category_summary}
+
+    - Trend wydatków w ujęciu miesięcznym:
+    {monthly_trend}
+
+    - Ostatnie 10 transakcji:
+    {recent_transactions}
+
+    Sformułuj swój raport w sposób profesjonalny, bezpośredni i konkretny. Unikaj ogólników typu "warto oszczędzać". Skup się na:
+    1. **Wychwytywaniu anomalii i trendów:** (np. która kategoria dominuje, czy widać skoki w ujęciu miesięcznym, czy zdarzenia losowe mocno nadszarpnęły budżet).
+    2. **Konkretnych rekomendacjach:** Gdzie realnie użytkownik może szukać optymalizacji kosztów na podstawie jego danych.
+    3. **Prognozie/Ostrzeżeniu:** Krótkie podsumowanie, na co powinien uważać w najbliższym miesiącu.
+
+    Formatuj odpowiedź używając czytelnych punktów Markdown, pogrubień i emotikon, aby raport wyglądał nowocześnie i przejrzyście w interfejsie Streamlit.
+    """
+
+    try:
+        # Wywołanie modelu tekstowego
+        response = client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=prompt
+        )
+        return response.text
+    except Exception as e:
+        return f"❌ Nie udało się wygenerować analizy AI. Błąd: {str(e)}"
