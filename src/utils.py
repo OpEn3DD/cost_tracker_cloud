@@ -4,10 +4,14 @@ from sqlalchemy import create_engine
 
 
 def get_db_engine():
-    """Pobiera czysty URL bazy bezpośrednio z zabezpieczeń Streamlita."""
     db_url = os.getenv("SUPABASE_DB_URL")
     if not db_url:
         raise ValueError("Brak zmiennej SUPABASE_DB_URL w Secrets!")
+
+    # Upewniamy się, że dialekt to dokładnie postgresql:// (czyli psycopg2)
+    if db_url.startswith("postgres://"):
+        db_url = db_url.replace("postgres://", "postgresql://", 1)
+
     return create_engine(db_url)
 
 
