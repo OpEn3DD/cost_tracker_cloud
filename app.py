@@ -4,21 +4,17 @@ import plotly.express as px
 from src.gemini_client import analyze_receipt_with_gemini, generate_financial_insights
 from src.utils import init_database, save_to_sqlite, get_all_expenses, get_category_summary, get_monthly_trend
 
-# Konfiguracja systemowa aplikacji
 st.set_page_config(
     page_title="Cost Tracker",
-    layout="centered",  # Natywne wyśrodkowanie i zwężenie widoku przez Streamlit
+    layout="centered",
     initial_sidebar_state="collapsed"
 )
 
-# Inicjalizacja struktury bazodanowej
 init_database()
 
-# Nagłówek główny
 st.title("System Analizy Wydatków i Struktur Kosztów")
-st.caption("Aplikacja do automatycznej ekstrakcji danych fiskalnych i kategoryzacji budżetowej.")
+st.caption("Aplikacja do automatycznej ekstrakcji kosztów i kategoryzacji budżetowej.")
 
-# Rejestr stałych kategorii systemowych
 CATEGORIES = [
     "Żywność",
     "Transport & Paliwo",
@@ -29,11 +25,11 @@ CATEGORIES = [
     "Inne"
 ]
 
-# Zarządzanie stanem sesji dla bufora danych bieżącego paragonu
+# stan sesji aktualnego paragonu
 if 'df_receipt' not in st.session_state:
     st.session_state.df_receipt = None
 
-# --- KORPUS GŁÓWNY: Definicja Zakładek ---
+# zakładki
 tab_monthly, tab_comparison, tab_add_receipt, tab_history,tab_ai = st.tabs([
     "Przegląd miesięczny",
     "Porównanie okresów",
@@ -42,14 +38,12 @@ tab_monthly, tab_comparison, tab_add_receipt, tab_history,tab_ai = st.tabs([
     "Analiza AI"
 ])
 
-# Pobranie danych bazowych do analiz globalnych
+# pobranie danych bazowych do analiz globalnych
 expenses_base = get_all_expenses()
 if not expenses_base.empty:
     expenses_base['Miesiąc'] = pd.to_datetime(expenses_base['data_zapisu']).dt.to_period('M').astype(str)
 
-# ==========================================
-# ZAKŁADKA 1: PRZEGLĄD WYBRANEGO MIESIĄCA
-# ==========================================
+# zakładka 1
 with tab_monthly:
     if not expenses_base.empty:
         available_months = sorted(expenses_base['Miesiąc'].unique(), reverse=True)
@@ -101,9 +95,7 @@ with tab_monthly:
         st.info(
             "Baza danych nie zawiera jeszcze żadnych rekordów. Przejdź do zakładki 'Dodaj paragon', aby wprowadzić dane.")
 
-# ==========================================
-# ZAKŁADKA 2: PORÓWNANIE OKRESÓW
-# ==========================================
+# zakładka 2
 with tab_comparison:
     if not expenses_base.empty:
         unique_months = sorted(expenses_base['Miesiąc'].unique())
@@ -149,9 +141,7 @@ with tab_comparison:
     else:
         st.info("Baza danych nie zawiera rekordów.")
 
-# ==========================================
-# ZAKŁADKA 3: DODAJ WYDATEK (AI lub Ręcznie)
-# ==========================================
+# zakładka 3
 with tab_add_receipt:
     st.markdown("### Metoda wprowadzenia danych")
     input_method = st.radio(
@@ -163,7 +153,7 @@ with tab_add_receipt:
 
     st.divider()
 
-    # --- WARIANT A: AUTOMATYCZNA EKSTRAKCJA AI ---
+    # ekstrakcja ze zdjęcia
     if input_method == "Skaner dokumentu (AI)":
         st.markdown("### Import Dokumentu")
         uploaded_file = st.file_uploader(
@@ -229,11 +219,10 @@ with tab_add_receipt:
         else:
             st.caption("Wgraj plik powyżej, aby uruchomić edytor pozycji i kategoryzację AI.")
 
-    # --- WARIANT B: FORMULARZ MANUALNY (NOWOŚĆ) ---
+    # dodanie ręczne
     else:
         st.markdown("### Nowy wydatek / rachunek")
 
-        # Tworzymy formularz Streamlit, aby dane wysyłały się pakietem dopiero po kliknięciu
         with st.form("manual_expense_form", clear_on_submit=True):
             manual_name = st.text_input(
                 "Nazwa towaru / usługi / rachunku:",
@@ -266,8 +255,6 @@ with tab_add_receipt:
                 if manual_name.strip() == "":
                     st.error("Pole 'Nazwa' nie może być puste!")
                 else:
-                    # Budujemy uproszczoną strukturę DataFrame identyczną z tą, którą generuje AI,
-                    # dzięki czemu funkcja save_to_sqlite w utils.py przetworzy ją bez modyfikacji!
                     manual_data = {
                         "Nazwa pozycji": [manual_name.strip()],
                         "Cena (PLN)": [manual_price],
@@ -283,9 +270,7 @@ with tab_add_receipt:
                         else:
                             st.error("Błąd zapisu strukturalnego do bazy danych.")
 
-# ==========================================
-# ZAKŁADKA 4: REJESTR TRANSAKCJI
-# ==========================================
+# zakładka 4
 with tab_history:
     expenses_h = get_all_expenses()
     if not expenses_h.empty:
@@ -307,58 +292,48 @@ with tab_history:
     else:
         st.info("Brak rekordów w archiwum systemowym.")
 
-# ==========================================
-# ZAKŁADKA 5: ANALIZA AI & DORADCA FINANSOWY
-# ==========================================
+# zakładka 5
 with tab_ai:
-    st.markdown("## 🧠 Inteligentny Doradca Finansowy GenSI")
+    st.markdown("## Inteligentny Doradca Finansowy AI")
     st.caption(
-        "Moduł wykorzystuje generatywną sztuczną inteligencję Gemini do głębokiej analizy Twoich struktur kosztów."
+        "Moduł wykorzystuje generatywną sztuczną inteligencję Gemini do analizy Twoich struktur kosztów."
     )
     st.divider()
 
-    # Pobieramy dane z bazy
     expenses_all = get_all_expenses()
 
     if expenses_all.empty:
         st.info(
-            "💡 Twój rejestr wydatków jest pusty. Dodaj lub zaimplementuj paragony, aby uruchomić analizę doradcy AI."
+            "Twój rejestr wydatków jest pusty. Dodaj lub zaimplementuj paragony, aby uruchomić analizę doradcy AI."
         )
     else:
-        # Stan sesji, aby zapamiętać wygenerowany raport i nie odpytywać API przy każdym kliknięciu w UI
         if "ai_report" not in st.session_state:
             st.session_state.ai_report = None
 
-        # PANEL KONTROLNY & INPUT UŻYTKOWNIKA
-        st.markdown("### 📊 Generuj nowy raport kosztów")
+        st.markdown("### Generuj nowy raport kosztów")
         st.write("Model Gemini przeanalizuje trendy miesięczne, anomalie oraz sklasyfikuje ryzyka budżetowe.")
 
-        # Nowe pole na dodatkowy kontekst od użytkownika
         user_input_context = st.text_area(
             "Dodatkowe informacje dla AI (opcjonalnie):",
             placeholder="np. Zarabiam 5000zł, w lipcu planuję wakacje, chcę zaoszczędzić na nowy rower.",
             help="Te informacje pomogą Gemini lepiej dopasować porady do Twojej obecnej sytuacji życiowej i planów."
         )
 
-        # Przycisk uruchamiający analizę
-        generate_button = st.button("🚀 Uruchom Analizę AI", use_container_width=True)
+        generate_button = st.button(" Uruchom Analizę AI", use_container_width=True)
 
         if generate_button:
-            with st.spinner("🧠 Sztuczna inteligencja analizuje Twoje finanse (szukanie anomalii i trendów)..."):
-                # Wywołanie funkcji z gemini_client z uwzględnieniem dodatkowego kontekstu
+            with st.spinner(" Sztuczna inteligencja analizuje Twoje finanse (szukanie anomalii i trendów)..."):
                 st.session_state.ai_report = generate_financial_insights(expenses_all, user_input_context)
                 st.toast("Analiza AI wygenerowana pomyślnie!", icon="✅")
                 st.rerun()  # Odświeżamy aplikację, aby od razu renderować nowy raport
 
-        # WYŚWIETLANIE WYNIKÓW
         if st.session_state.ai_report:
             st.divider()
-            st.markdown("### 📝 Wynik analizy strukturalnej Gemini:")
+            st.markdown("### Wynik analizy strukturalnej Gemini:")
             st.info(st.session_state.ai_report)
 
-            # Możliwość pobrania raportu jako plik tekstowy
             st.download_button(
-                label="📥 Pobierz raport AI (.txt)",
+                label=" Pobierz raport AI (.txt)",
                 data=st.session_state.ai_report,
                 file_name="raport_budzetowy_ai.txt",
                 mime="text/plain",

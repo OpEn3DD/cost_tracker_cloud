@@ -8,7 +8,6 @@ def get_db_engine():
     if not db_url:
         raise ValueError("Brak zmiennej SUPABASE_DB_URL w Secrets!")
 
-    # Upewniamy się, że dialekt to dokładnie postgresql:// (czyli psycopg2)
     if db_url.startswith("postgres://"):
         db_url = db_url.replace("postgres://", "postgresql://", 1)
 
